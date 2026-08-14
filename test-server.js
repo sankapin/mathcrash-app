@@ -53,7 +53,7 @@ async function main() {
   // ===== Config por defecto =====
   r = await j('GET', '/api/config');
   assert(r.status === 200 && r.data.combinadas && r.data.combinadas['1'].effPct === 75, 'config por defecto de combinadas nivel1 es 75%');
-  assert(r.data.parciales && r.data.parciales['1'].timeSec === 8 * 25, 'config por defecto de parciales usa 8 ejercicios');
+  assert(r.data.parciales && r.data.parciales['1'].timeSec === 16 * 25, 'config por defecto de parciales usa 16 ejercicios (2 por cada uno de los 8 temas)');
   assert(!r.data.parciales['boss'], 'parciales no tiene config de nivel boss');
 
   // ===== Enviar resultado de nivel: 100% correcto, rapido =====
@@ -108,6 +108,43 @@ async function main() {
   assert(r.status === 200, 'skip-level funciona con token admin');
   r = await j('POST', '/api/skip-level', { playerId: testPlayerId, scenarioId: 'mcd', level: 2 });
   assert(r.status === 401, 'skip-level rechaza sin token admin');
+
+  // ===== Medallas por completar un tema al 100% =====
+  r = await j('GET', `/api/medals/${playerId}`);
+  assert(r.status === 200 && Object.keys(r.data).length === 0, 'sin medallas al principio');
+
+  const recsOk = Array.from({ length: 6 }, (_, i) => ({ prompt: `mcd${i}`, correctAnswer: 5, givenAnswer: 5, isCorrect: true, attempts: 1, timeMs: 1000 }));
+  for (const lv of [1, 2, 3, 4, 5]) {
+    r = await j('POST', '/api/level-result', { playerId, playerName: 'Mateo', scenarioId: 'mcd', level: lv, records: recsOk });
+    assert(r.data.earnedMedal === false, `nivel ${lv} de mcd todavia no completa el tema, no hay medalla`);
+  }
+  const recsBoss = Array.from({ length: 10 }, (_, i) => ({ prompt: `mcdboss${i}`, correctAnswer: 5, givenAnswer: 5, isCorrect: true, attempts: 1, timeMs: 1000 }));
+  r = await j('POST', '/api/level-result', { playerId, playerName: 'Mateo', scenarioId: 'mcd', level: 'boss', records: recsBoss });
+  assert(r.data.earnedMedal === true && r.data.medalCount === 1, 'al completar el boss se completa el tema al 100% y se gana la primera medalla');
+
+  r = await j('POST', '/api/level-result', { playerId, playerName: 'Mateo', scenarioId: 'mcd', level: 'boss', records: recsBoss });
+  assert(r.data.earnedMedal === false, 'reintentar el boss ya completado no otorga otra medalla');
+
+  r = await j('GET', `/api/medals/${playerId}`);
+  assert(r.data.mcd === 1, 'el endpoint de medallas refleja 1 medalla en mcd');
+
+  // ===== Empezar de 0 (reset de escenario) =====
+  r = await j('POST', '/api/reset-scenario', { playerId, scenarioId: 'combinadas' });
+  assert(r.status === 400, 'no se puede reiniciar un tema que no esta 100% completo');
+
+  r = await j('POST', '/api/reset-scenario', { playerId, scenarioId: 'mcd' });
+  assert(r.status === 200, 'se puede reiniciar mcd porque esta 100% completo');
+  r = await j('GET', `/api/progress/${playerId}`);
+  assert(!r.data.mcd || Object.keys(r.data.mcd).length === 0, 'el progreso de mcd se borro tras el reinicio');
+  r = await j('GET', `/api/medals/${playerId}`);
+  assert(r.data.mcd === 1, 'la medalla de mcd se conserva despues del reinicio');
+
+  // completar mcd de nuevo tras el reinicio debe otorgar una segunda medalla
+  for (const lv of [1, 2, 3, 4, 5]) {
+    await j('POST', '/api/level-result', { playerId, playerName: 'Mateo', scenarioId: 'mcd', level: lv, records: recsOk });
+  }
+  r = await j('POST', '/api/level-result', { playerId, playerName: 'Mateo', scenarioId: 'mcd', level: 'boss', records: recsBoss });
+  assert(r.data.earnedMedal === true && r.data.medalCount === 2, 'completar el tema una segunda vez tras el reinicio otorga la segunda medalla');
 
   // ===== Config: guardar y verificar =====
   r = await j('PUT', '/api/config', { combinadas: { '1': { effPct: 90, timeSec: 50 } } }, adminToken);

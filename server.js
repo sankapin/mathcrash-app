@@ -25,7 +25,7 @@ const SCENARIOS_META = [
   { id: 'parciales', levels: [1, 2, 3, 4, 5] },
 ];
 function qCount(level) { return level === 'boss' ? 10 : 6; }
-function levelQuestionCount(scenarioId, level) { return scenarioId === 'parciales' ? 8 : qCount(level); }
+function levelQuestionCount(scenarioId, level) { return scenarioId === 'parciales' ? 16 : qCount(level); }
 
 function uid() { return crypto.randomUUID(); }
 
@@ -204,12 +204,22 @@ app.post('/api/skip-level', requireAdmin, async (req, res) => {
 // =====================================================================
 // RUTAS: RESULTADO DE NIVEL (fin de partida)
 // =====================================================================
+async function isScenarioFullyComplete(p, playerId, scenarioId) {
+  const meta = SCENARIOS_META.find(s => s.id === scenarioId);
+  if (!meta) return false;
+  const { rows } = await p.query('SELECT level, completed FROM progress WHERE player_id=$1 AND scenario_id=$2', [playerId, scenarioId]);
+  const map = {};
+  for (const r of rows) map[r.level] = r.completed;
+  return meta.levels.every(lv => map[String(lv)] === true);
+}
+
 app.post('/api/level-result', async (req, res) => {
   const { playerId, playerName, scenarioId, level, records } = req.body || {};
   if (!playerId || !scenarioId || !level || !Array.isArray(records) || records.length === 0) {
     return res.status(400).json({ error: 'Datos incompletos' });
   }
   const p = getPool();
+  const wasFullyComplete = await isScenarioFullyComplete(p, playerId, scenarioId);
   const total = records.length;
   const correct = records.filter(r => r.isCorrect).length;
   const effPct = Math.round((correct / total) * 100);
@@ -244,7 +254,41 @@ app.post('/api/level-result', async (req, res) => {
     `, [uid(), playerId, playerName || '', scenarioId, String(level), r.prompt, String(r.correctAnswer), r.givenAnswer === null || r.givenAnswer === undefined ? null : String(r.givenAnswer), !!r.isCorrect, r.attempts || 1, r.timeMs || 0, now]);
   }
 
-  res.json({ effPct, totalTimeSec, correct, total, earnedEff, earnedTime, cfg });
+  let earnedMedal = false;
+  let medalCount = null;
+  const nowFullyComplete = await isScenarioFullyComplete(p, playerId, scenarioId);
+  if (!wasFullyComplete && nowFullyComplete) {
+    const { rows: medalRows } = await p.query(`
+      INSERT INTO scenario_completions (player_id, scenario_id, count) VALUES ($1,$2,1)
+      ON CONFLICT (player_id, scenario_id) DO UPDATE SET count = scenario_completions.count + 1
+      RETURNING count
+    `, [playerId, scenarioId]);
+    earnedMedal = true;
+    medalCount = medalRows[0].count;
+  }
+
+  res.json({ effPct, totalTimeSec, correct, total, earnedEff, earnedTime, cfg, earnedMedal, medalCount });
+});
+
+// =====================================================================
+// RUTAS: REINICIAR ESCENARIO ("empezar de 0") Y MEDALLAS
+// =====================================================================
+app.post('/api/reset-scenario', async (req, res) => {
+  const { playerId, scenarioId } = req.body || {};
+  if (!playerId || !scenarioId) return res.status(400).json({ error: 'Faltan datos' });
+  const p = getPool();
+  const fullyComplete = await isScenarioFullyComplete(p, playerId, scenarioId);
+  if (!fullyComplete) return res.status(400).json({ error: 'Este tema todavía no está completado al 100%' });
+  await p.query('DELETE FROM progress WHERE player_id=$1 AND scenario_id=$2', [playerId, scenarioId]);
+  res.json({ ok: true });
+});
+
+app.get('/api/medals/:playerId', async (req, res) => {
+  const p = getPool();
+  const { rows } = await p.query('SELECT scenario_id, count FROM scenario_completions WHERE player_id=$1', [req.params.playerId]);
+  const out = {};
+  for (const r of rows) out[r.scenario_id] = r.count;
+  res.json(out);
 });
 
 // =====================================================================

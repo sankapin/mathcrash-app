@@ -231,10 +231,14 @@ function genDivisionEnteros(level) {
     a *= sa; const bb = b * sb; const answer = a / bb;
     return { type: 'numeric', prompt: `Resuelve: ${fmtNum(a)} ÷ ${fmtNum(bb)}`, answer };
   }
-  const c = randInt(2, 8); const b = randInt(2, 8);
-  const result = randInt(2, 10) * randChoice([1, -1]);
-  const dividend1 = result * c; const a = dividend1 * b;
-  return { type: 'numeric', prompt: `Resuelve: ${fmtNum(a)} ÷ ${fmtNum(b)} ÷ ${fmtNum(c)}`, answer: result };
+  // Nivel 5 (y nivel 6, usado por el mini-jefe/jefe final): division inexacta, resto distinto de 0.
+  // Se pide el cociente entero (numeros positivos, para evitar ambiguedad con el resto en negativos).
+  const maxA = L >= 6 ? 300 : 150;
+  const b = randInt(3, L >= 6 ? 18 : 12);
+  let a;
+  do { a = randInt(15, maxA); } while (a % b === 0);
+  const answer = Math.trunc(a / b);
+  return { type: 'numeric', prompt: `Resuelve la división entera (indicá el cociente): ${a} ÷ ${b}`, answer };
 }
 function genRaices(level) {
   const L = lvlIdx(level);
@@ -328,8 +332,8 @@ function showToast(msg) {
 let app = {
   view: 'role', currentUser: null, currentPlayer: null, currentScenario: null, session: null,
   adminTab: 'resumen', adminPlayerDetail: null, reportFilter: { player: 'all', scenario: 'all', level: 'all' },
-  tempError: '', testMode: false, freeLevelPick: undefined, postCreateReturnToAdmin: false,
-  cache: {}, progressCache: {},
+  tempError: '', testMode: false, freeLevelPick: 1, postCreateReturnToAdmin: false,
+  cache: {}, progressCache: {}, medalsCache: {},
 };
 const root = document.getElementById('app');
 
@@ -338,8 +342,14 @@ const root = document.getElementById('app');
 // =====================================================================
 async function refreshProgress() {
   if (!app.currentPlayer) return;
-  app.progressCache = await api('GET', `/api/progress/${app.currentPlayer.id}`);
+  const [progress, medals] = await Promise.all([
+    api('GET', `/api/progress/${app.currentPlayer.id}`),
+    api('GET', `/api/medals/${app.currentPlayer.id}`),
+  ]);
+  app.progressCache = progress;
+  app.medalsCache = medals;
 }
+function getMedalCount(scenarioId) { return app.medalsCache[scenarioId] || 0; }
 function getProgress(scenarioId, level) {
   const byScenario = app.progressCache[scenarioId] || {};
   return byScenario[String(level)] || { completed: false, bestEff: 0, bestTimeSec: null, achievements: { time: false, eff: false }, attemptsCount: 0, recentPrompts: [] };
@@ -521,12 +531,14 @@ async function enterWorldMap() {
 function viewWorldMap() {
   const cards = SCENARIOS.map(sc => {
     const pct = scenarioProgressPct(sc.id);
+    const medals = getMedalCount(sc.id);
     return `
     <div class="scenario-card" onclick="enterScenarioPath('${sc.id}')">
       <div class="emoji">${sc.emoji}</div>
       <div class="name">${esc(sc.name)}</div>
       <div class="progress-bar"><div class="fill" style="width:${pct}%"></div></div>
       <div class="pct">${pct}% completado</div>
+      ${medals > 0 ? `<div class="medal-badge">🏅 ×${medals}</div>` : ''}
     </div>`;
   }).join('');
   return `
@@ -540,6 +552,14 @@ function enterScenarioPath(scenarioId) {
   app.currentScenario = scenarioId;
   app.view = 'scenarioPath';
   render();
+}
+async function onResetScenario() {
+  if (!confirm('¿Seguro que querés empezar este tema de nuevo desde cero? Se van a volver a bloquear los niveles (tus medallas 🏅 no se pierden).')) return;
+  try {
+    await api('POST', '/api/reset-scenario', { playerId: app.currentPlayer.id, scenarioId: app.currentScenario });
+    await refreshProgress();
+    render();
+  } catch (e) { showToast(e.message); }
 }
 
 // =====================================================================
@@ -572,11 +592,21 @@ function viewScenarioPath() {
   const subtitle = sc.levels.includes('boss')
     ? '5 niveles + Jefe final. Cada nivel otorga 2 logros: ⏱️ velocidad y 🎯 efectividad.'
     : '5 niveles de prueba integradora, con ejercicios de todos los temas mezclados. Cada nivel otorga 2 logros: ⏱️ velocidad y 🎯 efectividad.';
+  const pct = scenarioProgressPct(sc.id);
+  const medals = getMedalCount(sc.id);
+  const medalsHtml = medals > 0 ? `<p class="medal-badge">🏅 Completaste este tema al 100% ${medals} ${medals === 1 ? 'vez' : 'veces'}</p>` : '';
+  const resetHtml = pct === 100 ? `
+    <div class="card" style="max-width:420px; margin:14px auto 0; text-align:center;">
+      <h3 style="margin-bottom:10px;">🔄 ¡Tema completado al 100%!</h3>
+      <p class="hint">Podés empezar de nuevo este tema desde cero (se vuelven a bloquear los niveles). Tus medallas 🏅 no se pierden.</p>
+      <button class="btn secondary" onclick="onResetScenario()">🔄 Empezar de 0</button>
+    </div>` : '';
   return `
   <div class="content">
     <div class="back-row"><a class="linklike" onclick="app.view='worldMap'; render();">&larr; Volver al mapa</a></div>
     <h2>${sc.emoji} ${esc(sc.name)}</h2>
     <p class="subtitle">${subtitle}</p>
+    ${medalsHtml}
     <div class="level-path">${nodes}</div>
     <div class="card" style="max-width:420px; margin:10px auto 0; text-align:center;">
       <h3 style="margin-bottom:10px;">🎚️ Practicar una dificultad específica</h3>
@@ -586,6 +616,7 @@ function viewScenarioPath() {
       </div>
       <p class="hint">Elige el nivel (1 al 5) y practica las veces que quieras, sin importar si está bloqueado en el camino de arriba.</p>
     </div>
+    ${resetHtml}
     ${app.testMode && sc.levels.includes('boss') ? `
     <div class="card" style="max-width:420px; margin:14px auto 0; text-align:center; border:2px dashed var(--accent-purple);">
       <h3 style="margin-bottom:10px;">🧪 Modo Prueba activo</h3>
@@ -598,16 +629,23 @@ function viewScenarioPath() {
     </div>` : ''}
   </div>`;
 }
+// La ultima pregunta de un nivel 1-5 usa la dificultad del nivel siguiente (mini-jefe).
+function miniBossLevelFor(level) { return Math.min(Number(level) + 1, 6); }
 function generateUniqueQuestions(sc, level, n, excludeSet) {
   const questions = [];
   const usedPrompts = new Set();
+  const hasMiniBoss = level !== 'boss' && sc.levels.includes('boss');
   for (let i = 0; i < n; i++) {
+    const isLast = i === n - 1;
+    const genLevel = (isLast && hasMiniBoss) ? miniBossLevelFor(level) : level;
     let q, tries = 0;
     do {
-      q = sc.gen(level);
+      q = sc.gen(genLevel);
       tries++;
     } while (tries < 25 && (usedPrompts.has(q.prompt) || excludeSet.has(q.prompt)));
     usedPrompts.add(q.prompt);
+    q.topicId = sc.id;
+    if (isLast && hasMiniBoss) q.isMiniBoss = true;
     questions.push(q);
   }
   return questions;
@@ -617,20 +655,43 @@ function onStartLevel(level) {
   const sc = SCENARIOS.find(s => s.id === app.currentScenario);
   const prog = getProgress(sc.id, levelParam);
   const excludeSet = new Set(prog.recentPrompts || []);
-  let questions;
   if (sc.id === 'parciales') {
-    const topics = shuffle(SCENARIOS.filter(s => s.id !== 'parciales'));
-    questions = topics.map(t => {
-      let q, tries = 0;
-      do { q = t.gen(levelParam); tries++; } while (tries < 15 && excludeSet.has(q.prompt));
-      return q;
-    });
-  } else {
-    const n = qCount(levelParam);
-    questions = generateUniqueQuestions(sc, levelParam, n, excludeSet);
+    const topics = SCENARIOS.filter(s => s.id !== 'parciales');
+    const questions = [];
+    for (const t of topics) {
+      for (let k = 0; k < 2; k++) {
+        let q, tries = 0;
+        do { q = t.gen(levelParam); tries++; } while (tries < 15 && (excludeSet.has(q.prompt) || questions.some(x => x.prompt === q.prompt)));
+        q.topicId = t.id; q.topicEmoji = t.emoji; q.topicName = t.name;
+        q.rowAnswered = false; q.rowWrong = false; q.rowAttempts = 0; q.rowStartTime = Date.now();
+        questions.push(q);
+      }
+    }
+    app.session = { scenarioId: sc.id, level: levelParam, mode: 'worksheet', questions, records: [] };
+    app.view = 'levelPlay';
+    render();
+    return;
   }
+  const n = qCount(levelParam);
+  const questions = generateUniqueQuestions(sc, levelParam, n, excludeSet);
   app.session = { scenarioId: sc.id, level: levelParam, questions, idx: 0, correct: 0, records: [], qStartTime: Date.now(), feedback: null, lastWrongIdx: null, attemptsForCurrent: 0, firstGivenAnswer: undefined, firstAttemptCorrect: false };
   app.view = 'levelPlay';
+  render();
+}
+// Descarta la pregunta actual (sin penalizar) y genera una nueva del mismo tema/nivel.
+function onChangeQuestion() {
+  const s = app.session;
+  const cur = s.questions[s.idx];
+  const t = SCENARIOS.find(x => x.id === cur.topicId);
+  const prog = getProgress(s.scenarioId, s.level);
+  const exclude = new Set([...(prog.recentPrompts || []), ...s.questions.map(x => x.prompt)]);
+  const genLevel = cur.isMiniBoss ? miniBossLevelFor(s.level) : s.level;
+  let q, tries = 0;
+  do { q = t.gen(genLevel); tries++; } while (tries < 25 && exclude.has(q.prompt));
+  q.topicId = t.id;
+  if (cur.isMiniBoss) q.isMiniBoss = true;
+  s.questions[s.idx] = q;
+  s.feedback = null; s.lastWrongIdx = null; s.attemptsForCurrent = 0; s.firstGivenAnswer = undefined; s.firstAttemptCorrect = false; s.qStartTime = Date.now();
   render();
 }
 
@@ -639,6 +700,7 @@ function onStartLevel(level) {
 // =====================================================================
 function viewLevelPlay() {
   const s = app.session;
+  if (s.mode === 'worksheet') return viewLevelPlayWorksheet();
   const sc = SCENARIOS.find(x => x.id === s.scenarioId);
   const q = s.questions[s.idx];
   const solved = s.feedback && s.feedback.status === 'correct';
@@ -662,6 +724,8 @@ function viewLevelPlay() {
   if (fb && fb.status === 'correct') feedbackHtml = `<div class="feedback ok">¡Correcto! 🎉</div>`;
   else if (fb && fb.status === 'wrong') feedbackHtml = `<div class="feedback bad">❌ No es correcto, ¡intenta de nuevo!</div>`;
   const nextBtn = solved ? `<button class="btn green" onclick="onNextQuestion()">${s.idx === s.questions.length - 1 ? 'Ver resultados' : 'Siguiente'} →</button>` : '';
+  const changeBtn = !solved ? `<button class="btn secondary" onclick="onChangeQuestion()">🔁 Cambiar cuenta</button>` : '';
+  const miniBossBadge = q.isMiniBoss ? `<div class="pill" style="background:var(--accent-purple); margin-bottom:8px; display:inline-block;">💀 ¡Desafío extra! Esta pregunta es más difícil</div>` : '';
   return `
   <div class="content">
     <div class="play-wrap">
@@ -669,12 +733,14 @@ function viewLevelPlay() {
         <span>${sc.emoji} ${esc(sc.name)} · ${levelLabel(s.level)}</span>
         <span>Pregunta ${s.idx + 1} / ${s.questions.length}</span>
       </div>
+      ${miniBossBadge}
       <div class="question-box">${q.prompt}</div>
       ${planeHtml}
       <div class="answer-area">
         ${answerHtml}
         ${feedbackHtml}
         ${nextBtn}
+        ${changeBtn}
       </div>
     </div>
   </div>`;
@@ -724,6 +790,101 @@ async function onNextQuestion() {
 }
 
 // =====================================================================
+// VISTA: HOJA DE PARCIALES (worksheet - todos los ejercicios juntos)
+// =====================================================================
+function viewLevelPlayWorksheet() {
+  const s = app.session;
+  const sc = SCENARIOS.find(x => x.id === s.scenarioId);
+  const answeredCount = s.questions.filter(q => q.rowAnswered).length;
+  let lastTopic = null;
+  const rows = s.questions.map((q, idx) => {
+    let groupHeader = '';
+    if (q.topicId !== lastTopic) {
+      lastTopic = q.topicId;
+      groupHeader = `<div class="ws-group-header">${q.topicEmoji} ${esc(q.topicName)}</div>`;
+    }
+    let inputHtml;
+    if (q.rowAnswered) {
+      inputHtml = `<span class="ws-answered">✅</span>`;
+    } else if (q.type === 'numeric') {
+      inputHtml = `
+        <input id="ws_${idx}" type="number" inputmode="numeric" class="${q.rowWrong ? 'ws-wrong' : ''}" placeholder="?" onkeydown="if(event.key==='Enter'){ onConfirmRow(${idx}); }">
+        <button class="btn small" onclick="onConfirmRow(${idx})">✔</button>
+        <button class="btn small secondary" onclick="onChangeWorksheetRow(${idx})">🔁</button>`;
+    } else {
+      const opts = q.options.map((opt, i) => `<option value="${i}">${esc(opt)}</option>`).join('');
+      inputHtml = `
+        <select id="ws_${idx}" class="${q.rowWrong ? 'ws-wrong' : ''}"><option value="">Elegí...</option>${opts}</select>
+        <button class="btn small" onclick="onConfirmRow(${idx})">✔</button>
+        <button class="btn small secondary" onclick="onChangeWorksheetRow(${idx})">🔁</button>`;
+    }
+    return `${groupHeader}
+    <div class="ws-row ${q.rowAnswered ? 'ws-row-done' : ''}">
+      <div class="ws-prompt">${idx + 1}. ${q.prompt} = </div>
+      <div class="ws-input">${inputHtml}</div>
+    </div>`;
+  }).join('');
+  return `
+  <div class="content">
+    <div class="play-wrap" style="max-width:720px;">
+      <div class="play-progress">
+        <span>${sc.emoji} ${esc(sc.name)} · ${levelLabel(s.level)}</span>
+        <span>${answeredCount} / ${s.questions.length} confirmados</span>
+      </div>
+      <p class="hint">Resolvé cada ejercicio y escribí el resultado al lado del "=". Apretá ✔ para confirmarlo. Si te equivocás no pasa nada, podés reintentar las veces que quieras (el resultado nunca se revela). Con 🔁 podés cambiar un ejercicio por otro del mismo tema.</p>
+      <div class="worksheet">${rows}</div>
+    </div>
+  </div>`;
+}
+async function onConfirmRow(idx) {
+  const s = app.session;
+  const q = s.questions[idx];
+  if (q.rowAnswered) return;
+  const el = document.getElementById('ws_' + idx);
+  const raw = el ? el.value : '';
+  if (raw === '') return;
+  let isCorrect = false, given;
+  if (q.type === 'numeric') {
+    given = Number(raw);
+    isCorrect = given === q.answer;
+  } else {
+    const choiceIdx = Number(raw);
+    given = q.options[choiceIdx];
+    isCorrect = choiceIdx === q.correctIndex;
+  }
+  q.rowAttempts++;
+  if (isCorrect) {
+    q.rowAnswered = true;
+    q.rowWrong = false;
+    const timeMs = Date.now() - q.rowStartTime;
+    s.records.push({
+      prompt: q.prompt,
+      correctAnswer: q.type === 'numeric' ? q.answer : q.options[q.correctIndex],
+      givenAnswer: given,
+      isCorrect: q.rowAttempts === 1,
+      attempts: q.rowAttempts,
+      timeMs,
+    });
+  } else {
+    q.rowWrong = true;
+  }
+  render();
+  if (s.questions.every(x => x.rowAnswered)) await finishLevel();
+}
+function onChangeWorksheetRow(idx) {
+  const s = app.session;
+  const cur = s.questions[idx];
+  const t = SCENARIOS.find(x => x.id === cur.topicId);
+  const exclude = new Set(s.questions.map(x => x.prompt));
+  let q, tries = 0;
+  do { q = t.gen(s.level); tries++; } while (tries < 25 && exclude.has(q.prompt));
+  q.topicId = t.id; q.topicEmoji = t.emoji; q.topicName = t.name;
+  q.rowAnswered = false; q.rowWrong = false; q.rowAttempts = 0; q.rowStartTime = Date.now();
+  s.questions[idx] = q;
+  render();
+}
+
+// =====================================================================
 // FIN DE NIVEL
 // =====================================================================
 async function finishLevel() {
@@ -747,10 +908,12 @@ function viewLevelResults() {
   const r = app.lastResult;
   const s = app.session;
   const sc = SCENARIOS.find(x => x.id === s.scenarioId);
+  const medalHtml = r.earnedMedal ? `<div class="medal-badge" style="font-size:18px;">🏅 ¡Completaste "${esc(sc.name)}" al 100%! (medalla n.º ${r.medalCount})</div>` : '';
   return `
   <div class="content center-screen">
     <h2>${r.correct === r.total ? '🏆 ¡Nivel perfecto!' : '✅ ¡Nivel completado!'}</h2>
     <p class="subtitle">${sc.emoji} ${esc(sc.name)} · ${levelLabel(s.level)}</p>
+    ${medalHtml}
     <div class="results-grid">
       <div class="stat-box"><div class="big">${r.correct}/${r.total}</div><div>Aciertos directos</div></div>
       <div class="stat-box"><div class="big">${r.effPct}%</div><div>Efectividad</div></div>
@@ -924,11 +1087,12 @@ async function openPlayerDetail(pid) {
   app.adminPlayerDetail = pid;
   render();
   try {
-    const [summary, progress] = await Promise.all([
+    const [summary, progress, medals] = await Promise.all([
       api('GET', `/api/players/${pid}/summary`),
       api('GET', `/api/progress/${pid}`),
+      api('GET', `/api/medals/${pid}`),
     ]);
-    app.cache.playerDetail = { pid, summary, progress };
+    app.cache.playerDetail = { pid, summary, progress, medals };
   } catch (e) { showToast(e.message); }
   render();
 }
@@ -953,9 +1117,11 @@ function adminPlayerDetailView() {
       const badges = prog ? (prog.achievements.time ? '⏱️' : '') + (prog.achievements.eff ? '🎯' : '') : '';
       return `<td style="text-align:center;">${prog && prog.completed ? `${prog.bestEff}% / ${fmtTime(prog.bestTimeSec)} ${badges}` : '—'}</td>`;
     }).join('');
-    return `<tr><td>${sc.emoji} ${esc(sc.name)}</td>${cells}</tr>`;
+    const medalCount = (d.medals || {})[sc.id] || 0;
+    const medalCell = `<td style="text-align:center;">${medalCount > 0 ? `🏅×${medalCount}` : '—'}</td>`;
+    return `<tr><td>${sc.emoji} ${esc(sc.name)}</td>${cells}${medalCell}</tr>`;
   }).join('');
-  const header = LEVELS.map(lv => `<th>${levelLabel(lv)}</th>`).join('');
+  const header = LEVELS.map(lv => `<th>${levelLabel(lv)}</th>`).join('') + '<th>Medallas</th>';
   return `
   <a class="linklike" onclick="app.adminPlayerDetail=null; render();">&larr; Volver a jugadores</a>
   <h3 style="margin-top:14px;">${p.avatar} ${esc(p.name)}</h3>
@@ -1118,8 +1284,8 @@ function onLogout() {
   app = {
     view: 'role', currentUser: null, currentPlayer: null, currentScenario: null, session: null,
     adminTab: 'resumen', adminPlayerDetail: null, reportFilter: { player: 'all', scenario: 'all', level: 'all' },
-    tempError: '', testMode: false, freeLevelPick: undefined, postCreateReturnToAdmin: false,
-    cache: {}, progressCache: {},
+    tempError: '', testMode: false, freeLevelPick: 1, postCreateReturnToAdmin: false,
+    cache: {}, progressCache: {}, medalsCache: {},
   };
   render();
 }

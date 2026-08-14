@@ -62,6 +62,31 @@ async function main() {
   const getApp = () => ctx.__mcGetApp();
   const setVal = (id, v) => { documentStub.getElementById(id).value = v; };
 
+  // ===== Generador de Divisiones: niveles 1,2,4 exactos (resto 0), nivel 5-6 inexactos (resto != 0) =====
+  for (const lv of [1, 2, 4]) {
+    for (let i = 0; i < 60; i++) {
+      const q = ctx.genDivisionEnteros(lv);
+      const m = q.prompt.match(/: \(?(-?\d+)\)? ÷ \(?(-?\d+)\)?$/);
+      assert(m && Number(m[1]) % Number(m[2]) === 0, `division nivel ${lv}: siempre exacta, resto 0 (intento ${i})`);
+    }
+  }
+  for (let i = 0; i < 60; i++) {
+    const q = ctx.genDivisionEnteros(3);
+    assert(Number.isInteger(q.answer), `division nivel 3: respuesta entera (intento ${i})`);
+  }
+  let foundNonExact5 = false;
+  for (let i = 0; i < 60; i++) {
+    const q = ctx.genDivisionEnteros(5);
+    const m = q.prompt.match(/: (-?\d+) ÷ (-?\d+)$/);
+    if (m) { const a = Number(m[1]), b = Number(m[2]); if (a % b !== 0) foundNonExact5 = true; }
+  }
+  assert(foundNonExact5, 'division nivel 5 genera divisiones con resto distinto de 0');
+  for (let i = 0; i < 40; i++) {
+    const q = ctx.genDivisionEnteros(6);
+    const m = q.prompt.match(/: (-?\d+) ÷ (-?\d+)$/);
+    if (m) assert(Number(m[1]) % Number(m[2]) !== 0, 'division nivel 6 (mini-jefe/jefe) siempre tiene resto distinto de 0');
+  }
+
   // ===== Pantalla inicial =====
   assert(html().includes('MATH CRASH') && html().includes('Soy Jugador') && html().includes('Soy Administrador'), 'pantalla inicial de seleccion de rol se renderiza');
 
@@ -147,6 +172,17 @@ async function main() {
   ctx.onStartLevel(1);
   await sleep(20);
   assert(getApp().view === 'levelPlay', 'inicia el nivel 1 y entra a la vista de juego');
+  const sessLvl1 = getApp().session;
+  assert(sessLvl1.questions[sessLvl1.questions.length - 1].isMiniBoss === true, 'la ultima pregunta del nivel 1 esta marcada como mini-jefe (mas dificil)');
+  assert(sessLvl1.questions.slice(0, -1).every(q => !q.isMiniBoss), 'solo la ultima pregunta del nivel es el mini-jefe');
+  assert(html().includes('Desafío extra') === false, 'la insignia de mini-jefe no aparece todavia en la primera pregunta');
+
+  // ===== Cambiar cuenta: descarta la pregunta actual y genera otra distinta =====
+  const beforeChangePrompt = getApp().session.questions[getApp().session.idx].prompt;
+  ctx.onChangeQuestion();
+  const afterChangePrompt = getApp().session.questions[getApp().session.idx].prompt;
+  assert(afterChangePrompt !== beforeChangePrompt, 'cambiar cuenta genera un ejercicio distinto al actual');
+  assert(getApp().session.feedback === null && getApp().session.attemptsForCurrent === 0, 'cambiar cuenta reinicia el estado de la pregunta (sin penalizar)');
 
   let guard = 0;
   while (getApp().view === 'levelPlay' && guard < 20) {
@@ -198,23 +234,66 @@ async function main() {
   const progAfterSkip = getApp().progressCache['potencias'];
   assert(progAfterSkip && progAfterSkip['1'] && progAfterSkip['1'].completed, 'niveles 1-5 quedan marcados como completados tras el salto');
 
-  // ===== Escenario Parciales (mezcla todos los temas) =====
-  ctx.enterScenarioPath('parciales');
-  await sleep(20);
-  ctx.onStartLevel(1);
-  await sleep(20);
-  assert(getApp().session.questions.length === 8, 'nivel de parciales trae 8 preguntas (una por cada otro escenario)');
-  let guardP = 0;
-  while (getApp().view === 'levelPlay' && guardP < 15) {
+  // ===== Completar el Jefe: dispara la medalla de oro por completar el tema al 100% =====
+  let guardBoss = 0;
+  while (getApp().view === 'levelPlay' && guardBoss < 20) {
     const s = getApp().session;
     const q = s.questions[s.idx];
     if (q.type === 'numeric') { setVal('numAnswer', String(q.answer)); ctx.onSubmitAnswer(); }
     else ctx.onSubmitAnswer(q.correctIndex);
     await ctx.onNextQuestion();
     await sleep(20);
-    guardP++;
+    guardBoss++;
   }
-  assert(getApp().view === 'levelResults' && getApp().lastResult.effPct === 100, 'nivel de parciales completo con 100% de efectividad');
+  assert(getApp().view === 'levelResults', 'el jefe de potencias se completa y muestra resultados');
+  assert(getApp().lastResult.earnedMedal === true && getApp().lastResult.medalCount === 1, 'completar el jefe otorga la primera medalla de oro del tema');
+  assert(html().includes('🏅'), 'la vista de resultados muestra la insignia de medalla');
+
+  // ===== Empezar de 0: reiniciar el tema completado, la medalla se conserva =====
+  getApp().view = 'scenarioPath';
+  ctx.render();
+  await sleep(10);
+  assert(html().includes('Empezar de 0'), 'el boton de reiniciar aparece porque el tema esta 100% completo');
+  await ctx.onResetScenario();
+  await sleep(30);
+  const progAfterReset = getApp().progressCache['potencias'];
+  assert(!progAfterReset || !progAfterReset['1'] || !progAfterReset['1'].completed, 'el progreso de potencias se reinicio (nivel 1 vuelve a estar bloqueado)');
+  assert(ctx.getMedalCount('potencias') === 1, 'la medalla ganada se conserva despues de reiniciar el tema');
+  ctx.render();
+  assert(html().includes('🏅'), 'el camino de niveles sigue mostrando la medalla ganada tras el reinicio');
+
+  // ===== Escenario Parciales: hoja de ejercicios (worksheet) con 2 por tema =====
+  ctx.enterScenarioPath('parciales');
+  await sleep(20);
+  ctx.onStartLevel(1);
+  await sleep(20);
+  assert(getApp().session.mode === 'worksheet', 'el nivel de parciales usa el modo hoja de ejercicios');
+  assert(getApp().session.questions.length === 16, 'la hoja de parciales trae 16 ejercicios (2 por cada uno de los 8 temas)');
+  assert(html().includes('confirmados'), 'la vista de la hoja muestra el contador de filas confirmadas');
+
+  // cambiar cuenta dentro de la hoja: descarta la fila 0 y genera otro ejercicio del mismo tema
+  const wsBeforePrompt = getApp().session.questions[0].prompt;
+  const wsTopic = getApp().session.questions[0].topicId;
+  ctx.onChangeWorksheetRow(0);
+  assert(getApp().session.questions[0].prompt !== wsBeforePrompt, 'cambiar cuenta en la hoja genera un ejercicio distinto');
+  assert(getApp().session.questions[0].topicId === wsTopic, 'cambiar cuenta en la hoja mantiene el mismo tema');
+  assert(getApp().session.questions[0].rowAnswered === false, 'la fila cambiada queda sin responder');
+
+  let guardWs = 0;
+  while (getApp().view === 'levelPlay' && guardWs < 60) {
+    const s = getApp().session;
+    const idx = s.questions.findIndex(q => !q.rowAnswered);
+    if (idx === -1) break;
+    const q = s.questions[idx];
+    if (q.type === 'numeric') setVal('ws_' + idx, String(q.answer));
+    else setVal('ws_' + idx, String(q.correctIndex));
+    await ctx.onConfirmRow(idx);
+    await sleep(10);
+    guardWs++;
+  }
+  assert(getApp().view === 'levelResults', 'la hoja de parciales se completa y muestra resultados');
+  assert(getApp().lastResult && getApp().lastResult.effPct === 100, 'la hoja de parciales se completa con 100% de efectividad');
+  assert(getApp().lastResult.total === 16, 'el resultado de parciales contabiliza los 16 ejercicios de la hoja');
 
   // ===== Ejercicio de coordenadas en Ejes Cartesianos (multiple choice, sin revelar coordenadas) =====
   let foundCoords = false;

@@ -79,6 +79,12 @@ async function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_attempts_player ON attempts(player_id);
     CREATE INDEX IF NOT EXISTS idx_attempts_scenario ON attempts(scenario_id);
+    CREATE TABLE IF NOT EXISTS scenario_completions (
+      player_id TEXT NOT NULL,
+      scenario_id TEXT NOT NULL,
+      count INT NOT NULL DEFAULT 0,
+      PRIMARY KEY (player_id, scenario_id)
+    );
   `);
 }
 
