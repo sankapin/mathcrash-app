@@ -284,7 +284,36 @@ function buildFactorization(numPrimes, maxExpByPrimeCount) {
 function fmtFactorization(pairs) {
   return pairs.map(([p, e]) => e === 1 ? `${p}` : `${p}${toSuper(e)}`).join(' × ');
 }
-function genPrimos(level) {
+function collapseSequence(seq) {
+  const pairs = [];
+  for (const p of seq) {
+    const last = pairs[pairs.length - 1];
+    if (last && last[0] === p) last[1]++; else pairs.push([p, 1]);
+  }
+  return pairs;
+}
+// Genera un ejercicio de "escalerita": el jugador hace la division sucesiva por primos
+// paso a paso (igual que en el cuaderno), siempre dividiendo por el menor primo posible.
+function genPrimosLadder(level) {
+  const L = lvlIdx(level);
+  const [numPrimes, maxExp] = ({ 1: [2, 1], 2: [2, 2], 3: [3, 1], 4: [3, 2], 5: [3, 3], 6: [4, 3] })[L];
+  const { n, pairs } = buildFactorization(numPrimes, maxExp);
+  const sequence = [];
+  for (const [p, e] of pairs) { for (let i = 0; i < e; i++) sequence.push(p); }
+  return {
+    type: 'ladder',
+    prompt: `Descomponé ${n} en factores primos usando el método de las divisiones sucesivas. Dividí siempre por el menor primo posible.`,
+    n,
+    sequence,
+    remaining: n,
+    stepIdx: 0,
+    rows: [],
+    wrongAttempts: 0,
+  };
+}
+// Version rapida (una sola pregunta derivada de la descomposicion), usada dentro de las
+// hojas de ejercicios (Parciales y Repaso Prueba) donde no entra la escalerita paso a paso.
+function genPrimosQuick(level) {
   const L = lvlIdx(level);
   if (L === 1) {
     const { n, pairs } = buildFactorization(2, 1);
@@ -352,10 +381,10 @@ const SCENARIOS = [
   { id: 'entera', name: 'División de Enteros', emoji: '➗', gen: genDivisionEnteros, levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'raices', name: 'Raíz Cuadrada y Cúbica', emoji: '√', gen: genRaices, levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'faltante', name: 'Número Faltante', emoji: '❓', gen: genFaltante, levels: [1, 2, 3, 4, 5, 'boss'] },
-  { id: 'primos', name: 'Números Primos', emoji: '🔑', gen: genPrimos, levels: [1, 2, 3, 4, 5, 'boss'] },
+  { id: 'primos', name: 'Números Primos', emoji: '🔑', gen: genPrimosLadder, genWorksheet: genPrimosQuick, levels: [1, 2, 3, 4, 5, 'boss'] },
   {
     id: 'parciales', name: 'Parciales', emoji: '📝', mode: 'worksheet', perTopic: 2, levels: [1, 2, 3, 4, 5],
-    topicsFn: () => SCENARIOS.filter(s => s.mode !== 'worksheet'),
+    topicsFn: () => SCENARIOS.filter(s => s.mode !== 'worksheet').map(s => ({ id: s.id, name: s.name, emoji: s.emoji, gen: s.genWorksheet || s.gen })),
     subtitle: '5 niveles de prueba integradora, con ejercicios de todos los temas mezclados, todos juntos en una hoja. Cada nivel otorga 2 logros: ⏱️ velocidad y 🎯 efectividad.',
   },
   {
@@ -365,13 +394,21 @@ const SCENARIOS = [
   },
 ];
 const REPASO_TOPICS = [
-  { id: 'primos', name: 'Números Primos', emoji: '🔑', gen: genPrimos },
+  { id: 'primos', name: 'Números Primos', emoji: '🔑', gen: genPrimosQuick },
   { id: 'mcm', name: 'Mínimo Común Múltiplo', emoji: '🔗', gen: genMCM },
   { id: 'mcd', name: 'Máximo Común Divisor', emoji: '💎', gen: genMCD },
   { id: 'raiz_cuadrada', name: 'Raíz Cuadrada', emoji: '√', gen: genRaizCuadradaSimple },
   { id: 'raiz_cubica', name: 'Raíz Cúbica', emoji: '∛', gen: genRaizCubicaSimple },
 ];
+// Para jugar el escenario normal (camino de niveles): usa sc.gen tal cual (por ej. la escalerita de primos).
 function findTopic(topicId) { return SCENARIOS.find(s => s.id === topicId) || REPASO_TOPICS.find(s => s.id === topicId); }
+// Para hojas de ejercicios (Parciales/Repaso): usa la version "rapida" de un tema si existe (por ej. primos
+// nunca debe generar la escalerita paso a paso dentro de una hoja, porque no entra en el formato de fila unica).
+function findWorksheetTopic(topicId) {
+  const sc = SCENARIOS.find(s => s.id === topicId);
+  if (sc) return { id: sc.id, name: sc.name, emoji: sc.emoji, gen: sc.genWorksheet || sc.gen };
+  return REPASO_TOPICS.find(s => s.id === topicId);
+}
 const LEVELS = [1, 2, 3, 4, 5, 'boss'];
 function qCount(level) { return level === 'boss' ? 10 : 6; }
 function levelQuestionCount(sc, level) { return sc.mode === 'worksheet' ? sc.topicsFn().length * sc.perTopic : qCount(level); }
@@ -788,7 +825,24 @@ function viewLevelPlay() {
   const q = s.questions[s.idx];
   const solved = s.feedback && s.feedback.status === 'correct';
   let answerHtml = '';
-  if (q.type === 'numeric') {
+  if (q.type === 'ladder') {
+    const doneRows = q.rows.map(r => `
+      <div class="ladder-row">
+        <span class="ladder-value">${r.value}</span>
+        <span class="ladder-bar"><span class="ladder-divisor">${r.divisor}</span></span>
+      </div>`).join('');
+    const finished = q.stepIdx === q.sequence.length;
+    const activeRow = finished
+      ? `<div class="ladder-row ladder-final"><span class="ladder-value">1</span></div>`
+      : `<div class="ladder-row ladder-active">
+          <span class="ladder-value">${q.remaining}</span>
+          <span class="ladder-bar">
+            <input id="ladderDivisor" type="number" inputmode="numeric" placeholder="÷" onkeydown="if(event.key==='Enter') onSubmitLadderStep();" autofocus>
+            <button class="btn small" onclick="onSubmitLadderStep()">✔</button>
+          </span>
+        </div>`;
+    answerHtml = `<div class="ladder">${doneRows}${activeRow}</div>`;
+  } else if (q.type === 'numeric') {
     answerHtml = `
       <input id="numAnswer" type="number" inputmode="numeric" ${solved ? 'disabled' : ''} placeholder="tu respuesta" onkeydown="if(event.key==='Enter') onSubmitAnswer();" autofocus>
       <button class="btn" ${solved ? 'disabled' : ''} onclick="onSubmitAnswer()">Responder</button>`;
@@ -858,6 +912,42 @@ function onSubmitAnswer(choiceIdx) {
     });
     s.feedback = { status: 'correct' };
   } else {
+    s.feedback = { status: 'wrong' };
+  }
+  render();
+}
+// Escalerita de Numeros Primos: se envia un divisor por vez, sin revelar el correcto si falla.
+function onSubmitLadderStep() {
+  const s = app.session;
+  const q = s.questions[s.idx];
+  if (q.stepIdx >= q.sequence.length) return;
+  const el = document.getElementById('ladderDivisor');
+  const raw = el ? el.value : '';
+  if (raw === '') return;
+  const given = Number(raw);
+  const expected = q.sequence[q.stepIdx];
+  if (given === expected) {
+    q.rows.push({ value: q.remaining, divisor: given });
+    q.remaining = q.remaining / given;
+    q.stepIdx++;
+    s.feedback = null;
+    if (q.stepIdx === q.sequence.length) {
+      const timeMs = Date.now() - s.qStartTime;
+      const correctStr = fmtFactorization(collapseSequence(q.sequence));
+      const firstTry = q.wrongAttempts === 0;
+      if (firstTry) s.correct++;
+      s.records.push({
+        prompt: q.prompt,
+        correctAnswer: correctStr,
+        givenAnswer: correctStr,
+        isCorrect: firstTry,
+        attempts: q.wrongAttempts + q.sequence.length,
+        timeMs,
+      });
+      s.feedback = { status: 'correct' };
+    }
+  } else {
+    q.wrongAttempts++;
     s.feedback = { status: 'wrong' };
   }
   render();
@@ -957,7 +1047,7 @@ async function onConfirmRow(idx) {
 function onChangeWorksheetRow(idx) {
   const s = app.session;
   const cur = s.questions[idx];
-  const t = findTopic(cur.topicId);
+  const t = findWorksheetTopic(cur.topicId);
   const exclude = new Set(s.questions.map(x => x.prompt));
   let q, tries = 0;
   do { q = t.gen(s.level); tries++; } while (tries < 25 && exclude.has(q.prompt));
@@ -1403,5 +1493,5 @@ function render() {
 // INIT
 // =====================================================================
 function __mcGetApp() { return app; } // utilidad interna de depuracion (no visible para el usuario)
-function __mcGetGenerators() { return { genPrimos, genRaizCuadradaSimple, genRaizCubicaSimple, findTopic, SCENARIOS, REPASO_TOPICS }; } // utilidad interna de depuracion
+function __mcGetGenerators() { return { genPrimosQuick, genPrimosLadder, genRaizCuadradaSimple, genRaizCubicaSimple, findTopic, findWorksheetTopic, SCENARIOS, REPASO_TOPICS }; } // utilidad interna de depuracion
 render();

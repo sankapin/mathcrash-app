@@ -295,12 +295,12 @@ async function main() {
   assert(getApp().lastResult && getApp().lastResult.effPct === 100, 'la hoja de parciales se completa con 100% de efectividad');
   assert(getApp().lastResult.total === 18, 'el resultado de parciales contabiliza los 18 ejercicios de la hoja');
 
-  // ===== Fuzz test del generador de Numeros Primos: la descomposicion es internamente consistente =====
+  // ===== Fuzz test del generador rapido de Numeros Primos (usado dentro de las hojas): consistencia interna =====
   const gens = ctx.__mcGetGenerators();
   let primosOk = true;
   for (let lv = 1; lv <= 6; lv++) {
     for (let i = 0; i < 40; i++) {
-      const q = gens.genPrimos(lv === 6 ? 'boss' : lv);
+      const q = gens.genPrimosQuick(lv === 6 ? 'boss' : lv);
       if (q.type === 'numeric') {
         if (!Number.isInteger(q.answer) || q.answer < 2) { primosOk = false; }
       } else {
@@ -321,7 +321,68 @@ async function main() {
       }
     }
   }
-  assert(primosOk, 'genPrimos produce respuestas y opciones internamente consistentes en todos los niveles (fuzz x40 por nivel)');
+  assert(primosOk, 'genPrimosQuick produce respuestas y opciones internamente consistentes en todos los niveles (fuzz x40 por nivel)');
+
+  // ===== Fuzz test de la escalerita de Numeros Primos (genPrimosLadder): secuencia consistente con n =====
+  let ladderGenOk = true;
+  for (let lv = 1; lv <= 6; lv++) {
+    for (let i = 0; i < 40; i++) {
+      const q = gens.genPrimosLadder(lv === 6 ? 'boss' : lv);
+      if (q.type !== 'ladder') ladderGenOk = false;
+      if (!Array.isArray(q.sequence) || q.sequence.length < 2) ladderGenOk = false;
+      if (q.sequence.reduce((a, p) => a * p, 1) !== q.n) ladderGenOk = false;
+      if (q.remaining !== q.n || q.stepIdx !== 0 || q.rows.length !== 0 || q.wrongAttempts !== 0) ladderGenOk = false;
+      // la secuencia debe estar en orden no decreciente (siempre se divide por el menor primo posible primero)
+      for (let k = 1; k < q.sequence.length; k++) { if (q.sequence[k] < q.sequence[k - 1]) ladderGenOk = false; }
+    }
+  }
+  assert(ladderGenOk, 'genPrimosLadder produce una secuencia de divisiones consistente con el numero original en todos los niveles (fuzz x40 por nivel)');
+
+  // ===== Escenario Numeros Primos (juego lineal): escalerita paso a paso =====
+  ctx.enterScenarioPath('primos');
+  await sleep(20);
+  ctx.onStartLevel(1);
+  await sleep(20);
+  assert(getApp().session.mode !== 'worksheet', 'el nivel de Numeros Primos usa el juego normal (no la hoja)');
+  let qLadder = getApp().session.questions[getApp().session.idx];
+  assert(qLadder.type === 'ladder', 'el ejercicio de Numeros Primos usa el tipo escalerita');
+
+  // un divisor incorrecto no revela la respuesta ni avanza la escalerita, y permite reintentar
+  const wrongDivisor = 999999; // no puede coincidir con ningun primo real usado por la escalerita
+  setVal('ladderDivisor', String(wrongDivisor));
+  ctx.onSubmitLadderStep();
+  assert(getApp().session.feedback.status === 'wrong', 'un divisor incorrecto en la escalerita marca feedback wrong');
+  assert(getApp().session.questions[getApp().session.idx].stepIdx === 0, 'un divisor incorrecto no avanza la escalerita');
+
+  // completar la escalerita paso a paso con los divisores correctos
+  while (qLadder.stepIdx < qLadder.sequence.length) {
+    setVal('ladderDivisor', String(qLadder.sequence[qLadder.stepIdx]));
+    ctx.onSubmitLadderStep();
+  }
+  assert(getApp().session.feedback.status === 'correct', 'completar la escalerita marca feedback correct');
+  assert(qLadder.remaining === 1, 'la escalerita termina en 1');
+  assert(qLadder.rows.length === qLadder.sequence.length, 'la escalerita muestra todos los pasos completados');
+
+  // cambiar cuenta en la escalerita: descarta la actual y genera una nueva con estado inicial limpio
+  await ctx.onNextQuestion();
+  await sleep(20);
+  ctx.onChangeQuestion();
+  const afterChangeQ = getApp().session.questions[getApp().session.idx];
+  assert(afterChangeQ.type === 'ladder' && afterChangeQ.stepIdx === 0 && afterChangeQ.rows.length === 0, 'cambiar cuenta en la escalerita genera una nueva con estado inicial limpio');
+
+  // jugar el resto del nivel completo (sin mas errores) hasta ver los resultados
+  let guardLadder = 0;
+  while (getApp().view === 'levelPlay' && guardLadder < 20) {
+    const s = getApp().session;
+    const q = s.questions[s.idx];
+    while (q.stepIdx < q.sequence.length) { setVal('ladderDivisor', String(q.sequence[q.stepIdx])); ctx.onSubmitLadderStep(); }
+    await ctx.onNextQuestion();
+    await sleep(10);
+    guardLadder++;
+  }
+  assert(getApp().view === 'levelResults', 'el nivel de Numeros Primos (escalerita) se completa y muestra resultados');
+  assert(getApp().lastResult && getApp().lastResult.total === 6, 'el resultado del nivel de primos contabiliza las 6 escaleritas');
+  assert(getApp().lastResult.correct === 5, 'la escalerita con el error inicial no cuenta como acierto de primer intento (5 de 6)');
 
   // ===== Escenario Repaso Prueba: hoja con 4 ejercicios de cada uno de los 5 temas de la prueba =====
   ctx.enterScenarioPath('repaso');

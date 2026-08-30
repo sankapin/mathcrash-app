@@ -169,6 +169,15 @@
 
   /* Medallas */
   .medal-badge{display:inline-block; font-size:13px; margin-top:4px; color:var(--accent-yellow); font-weight:700;}
+
+  /* Escalerita de division (Numeros Primos) */
+  .ladder{display:inline-flex; flex-direction:column; gap:2px; margin:14px auto; font-family:'Courier New',monospace; font-size:20px; background:var(--bg-panel); border-radius:14px; padding:16px 26px;}
+  .ladder-row{display:flex; align-items:center; gap:14px; padding:4px 0;}
+  .ladder-value{min-width:80px; text-align:right; font-weight:800;}
+  .ladder-bar{color:var(--text-dim); border-left:2px solid var(--text-dim); padding-left:14px; min-width:60px;}
+  .ladder-divisor{font-weight:800; color:var(--accent-green);}
+  .ladder-active input{width:70px; padding:6px 8px; border-radius:8px; border:2px solid #3d3a6b; background:#100e21; color:var(--text-light); font-size:18px; text-align:center;}
+  .ladder-final .ladder-value{color:var(--accent-green);}
 </style>
 </head>
 <body>
