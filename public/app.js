@@ -296,7 +296,7 @@ function collapseSequence(seq) {
 // paso a paso (igual que en el cuaderno), siempre dividiendo por el menor primo posible.
 function genPrimosLadder(level) {
   const L = lvlIdx(level);
-  const [numPrimes, maxExp] = ({ 1: [2, 1], 2: [2, 2], 3: [3, 1], 4: [3, 2], 5: [3, 3], 6: [4, 3] })[L];
+  const [numPrimes, maxExp] = ({ 1: [2, 1], 2: [2, 2], 3: [3, 2], 4: [3, 3], 5: [3, 4], 6: [4, 4] })[L];
   const { n, pairs } = buildFactorization(numPrimes, maxExp);
   const sequence = [];
   for (const [p, e] of pairs) { for (let i = 0; i < e; i++) sequence.push(p); }
@@ -332,9 +332,9 @@ function genPrimosQuick(level) {
     const total = pairs.reduce((a, [, e]) => a + e, 0);
     return { type: 'numeric', prompt: `¿Cuántos factores primos tiene ${n} en total (contando los repetidos)?`, answer: total };
   }
-  // L 5 y L 6 (mini-jefe / jefe): eleccion multiple de la descomposicion completa
+  // L 5 y L 6 (mini-jefe / jefe): eleccion multiple de la descomposicion completa (mas dificil que L4)
   const numPrimes = L >= 6 ? 4 : 3;
-  const maxExp = L >= 6 ? 3 : 2;
+  const maxExp = L >= 6 ? 5 : 4;
   const { n, pairs } = buildFactorization(numPrimes, maxExp);
   const correct = fmtFactorization(pairs);
   const candidates = new Set([correct]);

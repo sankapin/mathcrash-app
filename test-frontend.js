@@ -338,6 +338,32 @@ async function main() {
   }
   assert(ladderGenOk, 'genPrimosLadder produce una secuencia de divisiones consistente con el numero original en todos los niveles (fuzz x40 por nivel)');
 
+  // ===== La dificultad de Numeros Primos (escalerita y pregunta rapida) nunca debe bajar al subir de nivel =====
+  function avgLadderLength(lv, samples) {
+    let total = 0;
+    for (let i = 0; i < samples; i++) total += gens.genPrimosLadder(lv === 6 ? 'boss' : lv).sequence.length;
+    return total / samples;
+  }
+  function avgQuickMagnitude(lv, samples) {
+    let total = 0;
+    for (let i = 0; i < samples; i++) {
+      const q = gens.genPrimosQuick(lv === 6 ? 'boss' : lv);
+      const nums = q.prompt.match(/\d+/g).map(Number);
+      total += Math.max(...nums);
+    }
+    return total / samples;
+  }
+  let primosDifficultyOk = true;
+  let prevLadderLen = 0, prevQuickMag = 0;
+  for (let lv = 1; lv <= 6; lv++) {
+    const ladderLen = avgLadderLength(lv, 250);
+    const quickMag = avgQuickMagnitude(lv, 250);
+    if (ladderLen < prevLadderLen - 0.3) primosDifficultyOk = false; // pequeña tolerancia por ruido estadistico
+    if (quickMag < prevQuickMag - 1) primosDifficultyOk = false;
+    prevLadderLen = ladderLen; prevQuickMag = quickMag;
+  }
+  assert(primosDifficultyOk, 'la dificultad promedio de Numeros Primos (largo de escalerita / magnitud del numero) no disminuye al subir de nivel');
+
   // ===== Fuzz test de genPrimosMixed: el escenario normal debe poder dar los DOS tipos de ejercicio =====
   const mixedTypes = new Set();
   for (let i = 0; i < 60; i++) mixedTypes.add(gens.genPrimosMixed(3).type);
