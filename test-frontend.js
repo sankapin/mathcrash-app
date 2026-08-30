@@ -338,14 +338,39 @@ async function main() {
   }
   assert(ladderGenOk, 'genPrimosLadder produce una secuencia de divisiones consistente con el numero original en todos los niveles (fuzz x40 por nivel)');
 
-  // ===== Escenario Numeros Primos (juego lineal): escalerita paso a paso =====
+  // ===== Fuzz test de genPrimosMixed: el escenario normal debe poder dar los DOS tipos de ejercicio =====
+  const mixedTypes = new Set();
+  for (let i = 0; i < 60; i++) mixedTypes.add(gens.genPrimosMixed(3).type);
+  assert(mixedTypes.has('ladder'), 'genPrimosMixed puede generar el tipo escalerita');
+  assert(mixedTypes.has('numeric') || mixedTypes.has('choice'), 'genPrimosMixed tambien puede generar el tipo de pregunta rapida (numeric/choice)');
+
+  // Resuelve la pregunta actual correctamente al primer intento, sin importar el tipo (ladder/numeric/choice).
+  function solveCurrentQuestion() {
+    const q = getApp().session.questions[getApp().session.idx];
+    if (q.type === 'ladder') {
+      while (q.stepIdx < q.sequence.length) { setVal('ladderDivisor', String(q.sequence[q.stepIdx])); ctx.onSubmitLadderStep(); }
+    } else if (q.type === 'numeric') {
+      setVal('numAnswer', String(q.answer)); ctx.onSubmitAnswer();
+    } else {
+      ctx.onSubmitAnswer(q.correctIndex);
+    }
+  }
+
+  // ===== Escenario Numeros Primos (juego lineal): mezcla de escalerita y pregunta rapida =====
   ctx.enterScenarioPath('primos');
   await sleep(20);
   ctx.onStartLevel(1);
   await sleep(20);
   assert(getApp().session.mode !== 'worksheet', 'el nivel de Numeros Primos usa el juego normal (no la hoja)');
+
+  // forzamos (via cambiar cuenta) a que la primera pregunta sea del tipo escalerita, para probar su interaccion especifica
+  let guardForceLadder = 0;
+  while (getApp().session.questions[getApp().session.idx].type !== 'ladder' && guardForceLadder < 40) {
+    ctx.onChangeQuestion();
+    guardForceLadder++;
+  }
   let qLadder = getApp().session.questions[getApp().session.idx];
-  assert(qLadder.type === 'ladder', 'el ejercicio de Numeros Primos usa el tipo escalerita');
+  assert(qLadder.type === 'ladder', 'se puede forzar (cambiando cuenta) a obtener el tipo escalerita en Numeros Primos');
 
   // un divisor incorrecto no revela la respuesta ni avanza la escalerita, y permite reintentar
   const wrongDivisor = 999999; // no puede coincidir con ningun primo real usado por la escalerita
@@ -363,26 +388,28 @@ async function main() {
   assert(qLadder.remaining === 1, 'la escalerita termina en 1');
   assert(qLadder.rows.length === qLadder.sequence.length, 'la escalerita muestra todos los pasos completados');
 
-  // cambiar cuenta en la escalerita: descarta la actual y genera una nueva con estado inicial limpio
+  // cambiar cuenta (con cualquier tipo de ejercicio): descarta el actual y genera uno distinto
   await ctx.onNextQuestion();
   await sleep(20);
+  const primosBeforeChangePrompt = getApp().session.questions[getApp().session.idx].prompt;
   ctx.onChangeQuestion();
   const afterChangeQ = getApp().session.questions[getApp().session.idx];
-  assert(afterChangeQ.type === 'ladder' && afterChangeQ.stepIdx === 0 && afterChangeQ.rows.length === 0, 'cambiar cuenta en la escalerita genera una nueva con estado inicial limpio');
+  assert(afterChangeQ.prompt !== primosBeforeChangePrompt, 'cambiar cuenta en Numeros Primos genera un ejercicio distinto sin importar el tipo');
+  if (afterChangeQ.type === 'ladder') {
+    assert(afterChangeQ.stepIdx === 0 && afterChangeQ.rows.length === 0, 'cambiar cuenta a una escalerita nueva empieza con estado inicial limpio');
+  }
 
   // jugar el resto del nivel completo (sin mas errores) hasta ver los resultados
-  let guardLadder = 0;
-  while (getApp().view === 'levelPlay' && guardLadder < 20) {
-    const s = getApp().session;
-    const q = s.questions[s.idx];
-    while (q.stepIdx < q.sequence.length) { setVal('ladderDivisor', String(q.sequence[q.stepIdx])); ctx.onSubmitLadderStep(); }
+  let guardMixed = 0;
+  while (getApp().view === 'levelPlay' && guardMixed < 20) {
+    solveCurrentQuestion();
     await ctx.onNextQuestion();
     await sleep(10);
-    guardLadder++;
+    guardMixed++;
   }
-  assert(getApp().view === 'levelResults', 'el nivel de Numeros Primos (escalerita) se completa y muestra resultados');
-  assert(getApp().lastResult && getApp().lastResult.total === 6, 'el resultado del nivel de primos contabiliza las 6 escaleritas');
-  assert(getApp().lastResult.correct === 5, 'la escalerita con el error inicial no cuenta como acierto de primer intento (5 de 6)');
+  assert(getApp().view === 'levelResults', 'el nivel de Numeros Primos (mezcla de tipos) se completa y muestra resultados');
+  assert(getApp().lastResult && getApp().lastResult.total === 6, 'el resultado del nivel de primos contabiliza los 6 ejercicios');
+  assert(getApp().lastResult.correct === 5, 'el ejercicio con el error inicial no cuenta como acierto de primer intento (5 de 6)');
 
   // ===== Escenario Repaso Prueba: hoja con 4 ejercicios de cada uno de los 5 temas de la prueba =====
   ctx.enterScenarioPath('repaso');

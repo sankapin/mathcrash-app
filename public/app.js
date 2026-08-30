@@ -356,6 +356,11 @@ function genPrimosQuick(level) {
   const options = shuffle(Array.from(candidates));
   return { type: 'choice', prompt: `¿Cuál es la descomposición en factores primos de ${n}?`, options, correctIndex: options.indexOf(correct) };
 }
+// Mezcla los dos tipos de ejercicio de Numeros Primos dentro del escenario normal: a veces la
+// escalerita paso a paso, a veces la pregunta rapida (menor/mayor factor, cantidad, eleccion multiple).
+function genPrimosMixed(level) {
+  return Math.random() < 0.5 ? genPrimosLadder(level) : genPrimosQuick(level);
+}
 // ---- Generadores simples de raiz, usados solo por "Repaso Prueba" ----
 function genRaizCuadradaSimple(level) {
   const L = lvlIdx(level);
@@ -381,7 +386,7 @@ const SCENARIOS = [
   { id: 'entera', name: 'División de Enteros', emoji: '➗', gen: genDivisionEnteros, levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'raices', name: 'Raíz Cuadrada y Cúbica', emoji: '√', gen: genRaices, levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'faltante', name: 'Número Faltante', emoji: '❓', gen: genFaltante, levels: [1, 2, 3, 4, 5, 'boss'] },
-  { id: 'primos', name: 'Números Primos', emoji: '🔑', gen: genPrimosLadder, genWorksheet: genPrimosQuick, levels: [1, 2, 3, 4, 5, 'boss'] },
+  { id: 'primos', name: 'Números Primos', emoji: '🔑', gen: genPrimosMixed, genWorksheet: genPrimosQuick, levels: [1, 2, 3, 4, 5, 'boss'] },
   {
     id: 'parciales', name: 'Parciales', emoji: '📝', mode: 'worksheet', perTopic: 2, levels: [1, 2, 3, 4, 5],
     topicsFn: () => SCENARIOS.filter(s => s.mode !== 'worksheet').map(s => ({ id: s.id, name: s.name, emoji: s.emoji, gen: s.genWorksheet || s.gen })),
@@ -1493,5 +1498,5 @@ function render() {
 // INIT
 // =====================================================================
 function __mcGetApp() { return app; } // utilidad interna de depuracion (no visible para el usuario)
-function __mcGetGenerators() { return { genPrimosQuick, genPrimosLadder, genRaizCuadradaSimple, genRaizCubicaSimple, findTopic, findWorksheetTopic, SCENARIOS, REPASO_TOPICS }; } // utilidad interna de depuracion
+function __mcGetGenerators() { return { genPrimosQuick, genPrimosLadder, genPrimosMixed, genRaizCuadradaSimple, genRaizCubicaSimple, findTopic, findWorksheetTopic, SCENARIOS, REPASO_TOPICS }; } // utilidad interna de depuracion
 render();
