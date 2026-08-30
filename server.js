@@ -22,10 +22,16 @@ const SCENARIOS_META = [
   { id: 'entera', levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'raices', levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'faltante', levels: [1, 2, 3, 4, 5, 'boss'] },
+  { id: 'primos', levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'parciales', levels: [1, 2, 3, 4, 5] },
+  { id: 'repaso', levels: [1, 2, 3, 4, 5] },
 ];
 function qCount(level) { return level === 'boss' ? 10 : 6; }
-function levelQuestionCount(scenarioId, level) { return scenarioId === 'parciales' ? 16 : qCount(level); }
+function levelQuestionCount(scenarioId, level) {
+  if (scenarioId === 'parciales') return 18;
+  if (scenarioId === 'repaso') return 20;
+  return qCount(level);
+}
 
 function uid() { return crypto.randomUUID(); }
 

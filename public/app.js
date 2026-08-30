@@ -270,9 +270,74 @@ function genFaltante(level) {
   else { prompt = `En una división: dividendo = ${D}, divisor = ${d}, cociente = ${c}. ¿Cuál es el resto?`; answer = r; }
   return { type: 'numeric', prompt, answer };
 }
-function genParcial(level) {
-  const pool = SCENARIOS.filter(s => s.id !== 'parciales');
-  return randChoice(pool).gen(level);
+// ---- Numeros Primos (descomposicion en factores primos) ----
+const PRIME_POOL = [2, 3, 5, 7, 11, 13, 17, 19];
+function buildFactorization(numPrimes, maxExpByPrimeCount) {
+  const chosen = shuffle(PRIME_POOL.slice(0, Math.min(PRIME_POOL.length, numPrimes + 2))).slice(0, numPrimes).sort((a, b) => a - b);
+  const pairs = chosen.map(p => {
+    const cap = p <= 5 ? maxExpByPrimeCount : (p <= 11 ? Math.max(1, maxExpByPrimeCount - 1) : 1);
+    return [p, randInt(1, cap)];
+  });
+  const n = pairs.reduce((acc, [p, e]) => acc * Math.pow(p, e), 1);
+  return { n, pairs };
+}
+function fmtFactorization(pairs) {
+  return pairs.map(([p, e]) => e === 1 ? `${p}` : `${p}${toSuper(e)}`).join(' × ');
+}
+function genPrimos(level) {
+  const L = lvlIdx(level);
+  if (L === 1) {
+    const { n, pairs } = buildFactorization(2, 1);
+    return { type: 'numeric', prompt: `¿Cuál es el menor factor primo de ${n}?`, answer: pairs[0][0] };
+  }
+  if (L === 2) {
+    const { n, pairs } = buildFactorization(2, 2);
+    return { type: 'numeric', prompt: `¿Cuál es el mayor factor primo de ${n}?`, answer: pairs[pairs.length - 1][0] };
+  }
+  if (L === 3) {
+    const { n, pairs } = buildFactorization(3, 2);
+    return { type: 'numeric', prompt: `¿Cuántos factores primos DISTINTOS tiene ${n}?`, answer: pairs.length };
+  }
+  if (L === 4) {
+    const { n, pairs } = buildFactorization(3, 3);
+    const total = pairs.reduce((a, [, e]) => a + e, 0);
+    return { type: 'numeric', prompt: `¿Cuántos factores primos tiene ${n} en total (contando los repetidos)?`, answer: total };
+  }
+  // L 5 y L 6 (mini-jefe / jefe): eleccion multiple de la descomposicion completa
+  const numPrimes = L >= 6 ? 4 : 3;
+  const maxExp = L >= 6 ? 3 : 2;
+  const { n, pairs } = buildFactorization(numPrimes, maxExp);
+  const correct = fmtFactorization(pairs);
+  const candidates = new Set([correct]);
+  let guard = 0;
+  while (candidates.size < 4 && guard < 40) {
+    const variant = pairs.map(([p, e]) => [p, e]);
+    const idx = randInt(0, variant.length - 1);
+    if (Math.random() < 0.5) {
+      variant[idx][1] = Math.max(1, variant[idx][1] + randChoice([1, -1]));
+    } else {
+      const poolIdx = PRIME_POOL.indexOf(variant[idx][0]);
+      const newIdx = Math.max(0, Math.min(PRIME_POOL.length - 1, poolIdx + randChoice([1, -1])));
+      variant[idx][0] = PRIME_POOL[newIdx];
+    }
+    variant.sort((a, b) => a[0] - b[0]);
+    candidates.add(fmtFactorization(variant));
+    guard++;
+  }
+  const options = shuffle(Array.from(candidates));
+  return { type: 'choice', prompt: `¿Cuál es la descomposición en factores primos de ${n}?`, options, correctIndex: options.indexOf(correct) };
+}
+// ---- Generadores simples de raiz, usados solo por "Repaso Prueba" ----
+function genRaizCuadradaSimple(level) {
+  const L = lvlIdx(level);
+  const base = L <= 2 ? randInt(2, 12) : L <= 4 ? randInt(8, 25) : randInt(15, 40);
+  return { type: 'numeric', prompt: `Calcula: √${base * base}`, answer: base };
+}
+function genRaizCubicaSimple(level) {
+  const L = lvlIdx(level);
+  const magnitude = L <= 2 ? randInt(2, 6) : L <= 4 ? randInt(3, 9) : randInt(4, 12);
+  const base = L >= 4 ? magnitude * randChoice([1, -1]) : magnitude;
+  return { type: 'numeric', prompt: `Calcula: ∛${base * base * base}`, answer: base };
 }
 
 // =====================================================================
@@ -287,11 +352,29 @@ const SCENARIOS = [
   { id: 'entera', name: 'División de Enteros', emoji: '➗', gen: genDivisionEnteros, levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'raices', name: 'Raíz Cuadrada y Cúbica', emoji: '√', gen: genRaices, levels: [1, 2, 3, 4, 5, 'boss'] },
   { id: 'faltante', name: 'Número Faltante', emoji: '❓', gen: genFaltante, levels: [1, 2, 3, 4, 5, 'boss'] },
-  { id: 'parciales', name: 'Parciales', emoji: '📝', gen: genParcial, levels: [1, 2, 3, 4, 5] },
+  { id: 'primos', name: 'Números Primos', emoji: '🔑', gen: genPrimos, levels: [1, 2, 3, 4, 5, 'boss'] },
+  {
+    id: 'parciales', name: 'Parciales', emoji: '📝', mode: 'worksheet', perTopic: 2, levels: [1, 2, 3, 4, 5],
+    topicsFn: () => SCENARIOS.filter(s => s.mode !== 'worksheet'),
+    subtitle: '5 niveles de prueba integradora, con ejercicios de todos los temas mezclados, todos juntos en una hoja. Cada nivel otorga 2 logros: ⏱️ velocidad y 🎯 efectividad.',
+  },
+  {
+    id: 'repaso', name: 'Repaso Prueba', emoji: '📚', mode: 'worksheet', perTopic: 4, levels: [1, 2, 3, 4, 5],
+    topicsFn: () => REPASO_TOPICS,
+    subtitle: '5 niveles de repaso para la prueba: Números Primos, m.c.m., M.C.D., Raíz Cuadrada y Raíz Cúbica, todos juntos en una hoja. Cada nivel otorga 2 logros: ⏱️ velocidad y 🎯 efectividad.',
+  },
 ];
+const REPASO_TOPICS = [
+  { id: 'primos', name: 'Números Primos', emoji: '🔑', gen: genPrimos },
+  { id: 'mcm', name: 'Mínimo Común Múltiplo', emoji: '🔗', gen: genMCM },
+  { id: 'mcd', name: 'Máximo Común Divisor', emoji: '💎', gen: genMCD },
+  { id: 'raiz_cuadrada', name: 'Raíz Cuadrada', emoji: '√', gen: genRaizCuadradaSimple },
+  { id: 'raiz_cubica', name: 'Raíz Cúbica', emoji: '∛', gen: genRaizCubicaSimple },
+];
+function findTopic(topicId) { return SCENARIOS.find(s => s.id === topicId) || REPASO_TOPICS.find(s => s.id === topicId); }
 const LEVELS = [1, 2, 3, 4, 5, 'boss'];
 function qCount(level) { return level === 'boss' ? 10 : 6; }
-function levelQuestionCount(sc, level) { return sc.id === 'parciales' ? (SCENARIOS.length - 1) : qCount(level); }
+function levelQuestionCount(sc, level) { return sc.mode === 'worksheet' ? sc.topicsFn().length * sc.perTopic : qCount(level); }
 function levelLabel(level) { return level === 'boss' ? 'JEFE FINAL' : `Nivel ${level}`; }
 
 // =====================================================================
@@ -655,11 +738,11 @@ function onStartLevel(level) {
   const sc = SCENARIOS.find(s => s.id === app.currentScenario);
   const prog = getProgress(sc.id, levelParam);
   const excludeSet = new Set(prog.recentPrompts || []);
-  if (sc.id === 'parciales') {
-    const topics = SCENARIOS.filter(s => s.id !== 'parciales');
+  if (sc.mode === 'worksheet') {
+    const topics = sc.topicsFn();
     const questions = [];
     for (const t of topics) {
-      for (let k = 0; k < 2; k++) {
+      for (let k = 0; k < sc.perTopic; k++) {
         let q, tries = 0;
         do { q = t.gen(levelParam); tries++; } while (tries < 15 && (excludeSet.has(q.prompt) || questions.some(x => x.prompt === q.prompt)));
         q.topicId = t.id; q.topicEmoji = t.emoji; q.topicName = t.name;
@@ -874,7 +957,7 @@ async function onConfirmRow(idx) {
 function onChangeWorksheetRow(idx) {
   const s = app.session;
   const cur = s.questions[idx];
-  const t = SCENARIOS.find(x => x.id === cur.topicId);
+  const t = findTopic(cur.topicId);
   const exclude = new Set(s.questions.map(x => x.prompt));
   let q, tries = 0;
   do { q = t.gen(s.level); tries++; } while (tries < 25 && exclude.has(q.prompt));
@@ -1320,4 +1403,5 @@ function render() {
 // INIT
 // =====================================================================
 function __mcGetApp() { return app; } // utilidad interna de depuracion (no visible para el usuario)
+function __mcGetGenerators() { return { genPrimos, genRaizCuadradaSimple, genRaizCubicaSimple, findTopic, SCENARIOS, REPASO_TOPICS }; } // utilidad interna de depuracion
 render();

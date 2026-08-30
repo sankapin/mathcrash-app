@@ -268,7 +268,7 @@ async function main() {
   ctx.onStartLevel(1);
   await sleep(20);
   assert(getApp().session.mode === 'worksheet', 'el nivel de parciales usa el modo hoja de ejercicios');
-  assert(getApp().session.questions.length === 16, 'la hoja de parciales trae 16 ejercicios (2 por cada uno de los 8 temas)');
+  assert(getApp().session.questions.length === 18, 'la hoja de parciales trae 18 ejercicios (2 por cada uno de los 9 temas)');
   assert(html().includes('confirmados'), 'la vista de la hoja muestra el contador de filas confirmadas');
 
   // cambiar cuenta dentro de la hoja: descarta la fila 0 y genera otro ejercicio del mismo tema
@@ -293,7 +293,67 @@ async function main() {
   }
   assert(getApp().view === 'levelResults', 'la hoja de parciales se completa y muestra resultados');
   assert(getApp().lastResult && getApp().lastResult.effPct === 100, 'la hoja de parciales se completa con 100% de efectividad');
-  assert(getApp().lastResult.total === 16, 'el resultado de parciales contabiliza los 16 ejercicios de la hoja');
+  assert(getApp().lastResult.total === 18, 'el resultado de parciales contabiliza los 18 ejercicios de la hoja');
+
+  // ===== Fuzz test del generador de Numeros Primos: la descomposicion es internamente consistente =====
+  const gens = ctx.__mcGetGenerators();
+  let primosOk = true;
+  for (let lv = 1; lv <= 6; lv++) {
+    for (let i = 0; i < 40; i++) {
+      const q = gens.genPrimos(lv === 6 ? 'boss' : lv);
+      if (q.type === 'numeric') {
+        if (!Number.isInteger(q.answer) || q.answer < 2) { primosOk = false; }
+      } else {
+        if (!(q.options.length >= 2 && q.options.length <= 4)) primosOk = false;
+        if (q.correctIndex < 0 || q.correctIndex >= q.options.length) primosOk = false;
+        if (new Set(q.options).size !== q.options.length) primosOk = false;
+        // el numero reconstruido a partir de la opcion correcta debe coincidir con el enunciado
+        const nInPrompt = Number(q.prompt.match(/de (\d+)/)[1]);
+        const factors = q.options[q.correctIndex].split('×').map(f => f.trim());
+        const reconstructed = factors.reduce((acc, f) => {
+          const m = f.match(/^(\d+)([⁰¹²³⁴⁵⁶⁷⁸⁹]*)$/);
+          const base = Number(m[1]);
+          const supMap = { '⁰': 0, '¹': 1, '²': 2, '³': 3, '⁴': 4, '⁵': 5, '⁶': 6, '⁷': 7, '⁸': 8, '⁹': 9 };
+          const exp = m[2] ? m[2].split('').reduce((e, c) => e * 10 + supMap[c], 0) : 1;
+          return acc * Math.pow(base, exp);
+        }, 1);
+        if (reconstructed !== nInPrompt) primosOk = false;
+      }
+    }
+  }
+  assert(primosOk, 'genPrimos produce respuestas y opciones internamente consistentes en todos los niveles (fuzz x40 por nivel)');
+
+  // ===== Escenario Repaso Prueba: hoja con 4 ejercicios de cada uno de los 5 temas de la prueba =====
+  ctx.enterScenarioPath('repaso');
+  await sleep(20);
+  ctx.onStartLevel(1);
+  await sleep(20);
+  assert(getApp().session.mode === 'worksheet', 'el nivel de repaso prueba usa el modo hoja de ejercicios');
+  assert(getApp().session.questions.length === 20, 'la hoja de repaso trae 20 ejercicios (4 por cada uno de los 5 temas de la prueba)');
+  assert(html().includes('Raíz Cuadrada') && html().includes('Raíz Cúbica'), 'la hoja de repaso muestra Raiz Cuadrada y Raiz Cubica como temas separados');
+
+  // cambiar cuenta sobre una fila de raiz_cuadrada (tema que solo existe en REPASO_TOPICS, no en SCENARIOS)
+  const raizRowIdx = getApp().session.questions.findIndex(q => q.topicId === 'raiz_cuadrada');
+  assert(raizRowIdx !== -1, 'la hoja de repaso incluye filas del tema raiz_cuadrada');
+  const raizBeforePrompt = getApp().session.questions[raizRowIdx].prompt;
+  ctx.onChangeWorksheetRow(raizRowIdx);
+  assert(getApp().session.questions[raizRowIdx].topicId === 'raiz_cuadrada', 'cambiar cuenta en una fila de raiz_cuadrada mantiene el mismo tema (findTopic resuelve temas fuera de SCENARIOS)');
+  assert(getApp().session.questions[raizRowIdx].prompt !== raizBeforePrompt, 'cambiar cuenta en la fila de raiz_cuadrada genera un ejercicio distinto');
+
+  let guardRepaso = 0;
+  while (getApp().view === 'levelPlay' && guardRepaso < 60) {
+    const s = getApp().session;
+    const idx = s.questions.findIndex(q => !q.rowAnswered);
+    if (idx === -1) break;
+    const q = s.questions[idx];
+    if (q.type === 'numeric') setVal('ws_' + idx, String(q.answer));
+    else setVal('ws_' + idx, String(q.correctIndex));
+    await ctx.onConfirmRow(idx);
+    await sleep(10);
+    guardRepaso++;
+  }
+  assert(getApp().view === 'levelResults', 'la hoja de repaso se completa y muestra resultados');
+  assert(getApp().lastResult && getApp().lastResult.total === 20, 'el resultado de repaso contabiliza los 20 ejercicios de la hoja');
 
   // ===== Ejercicio de coordenadas en Ejes Cartesianos (multiple choice, sin revelar coordenadas) =====
   let foundCoords = false;

@@ -53,8 +53,12 @@ async function main() {
   // ===== Config por defecto =====
   r = await j('GET', '/api/config');
   assert(r.status === 200 && r.data.combinadas && r.data.combinadas['1'].effPct === 75, 'config por defecto de combinadas nivel1 es 75%');
-  assert(r.data.parciales && r.data.parciales['1'].timeSec === 16 * 25, 'config por defecto de parciales usa 16 ejercicios (2 por cada uno de los 8 temas)');
+  assert(r.data.parciales && r.data.parciales['1'].timeSec === 18 * 25, 'config por defecto de parciales usa 18 ejercicios (2 por cada uno de los 9 temas)');
   assert(!r.data.parciales['boss'], 'parciales no tiene config de nivel boss');
+  assert(r.data.primos && r.data.primos['1'].effPct === 75, 'config por defecto de primos existe (nivel 1 al 75%)');
+  assert(r.data.primos['boss'], 'primos tiene config de nivel boss');
+  assert(r.data.repaso && r.data.repaso['1'].timeSec === 20 * 25, 'config por defecto de repaso usa 20 ejercicios (4 por cada uno de los 5 temas de la prueba)');
+  assert(!r.data.repaso['boss'], 'repaso no tiene config de nivel boss');
 
   // ===== Enviar resultado de nivel: 100% correcto, rapido =====
   const records1 = Array.from({ length: 6 }, (_, i) => ({ prompt: `p${i}`, correctAnswer: 5, givenAnswer: 5, isCorrect: true, attempts: 1, timeMs: 1000 }));
